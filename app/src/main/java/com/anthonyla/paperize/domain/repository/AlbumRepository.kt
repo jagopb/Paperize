@@ -33,6 +33,8 @@ interface AlbumRepository {
         onProgress: (saved: Int, total: Int) -> Unit = { _, _ -> }
     ): Boolean
 
+    suspend fun syncFolderWallpapers(albumId: String, folderId: String, currentWallpapers: List<Wallpaper>): Int
+
     suspend fun reorderAlbum(albumId: String, folders: List<Folder>, wallpapers: List<Wallpaper>)
 
     suspend fun removeWallpapersFromAlbum(albumId: String, wallpaperIds: List<String>)
