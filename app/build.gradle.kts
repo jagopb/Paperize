@@ -95,6 +95,7 @@ dependencies {
     implementation(libs.google.material)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.coil.compose)
+    implementation(libs.coil.network)
     implementation(libs.coil.gif)
     implementation(libs.coil.svg)
     implementation(libs.androidx.datastore.preferences)
