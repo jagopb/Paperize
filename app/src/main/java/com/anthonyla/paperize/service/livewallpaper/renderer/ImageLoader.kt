@@ -23,9 +23,14 @@ class ContentUriImageLoader(
     private val scalingType: ScalingType = ScalingType.FILL
 ) : ImageLoader {
     override fun load(targetWidth: Int, targetHeight: Int): Bitmap? = try {
-        val source = ImageDecoder.createSource(contentResolver, uri)
+        val isRemote = uri.scheme == "https" || uri.scheme == "http"
+        val source = if (isRemote) {
+            val bytes = com.anthonyla.paperize.core.util.fetchRemoteImageBytes(uri)
+            ImageDecoder.createSource(java.nio.ByteBuffer.wrap(bytes))
+        } else {
+            ImageDecoder.createSource(contentResolver, uri)
+        }
         ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
-            // ImageDecoder reports dimensions after applying EXIF orientation.
             val (width, height) = calculateDecodeSize(
                 info.size.width, info.size.height, targetWidth, targetHeight, scalingType
             )
