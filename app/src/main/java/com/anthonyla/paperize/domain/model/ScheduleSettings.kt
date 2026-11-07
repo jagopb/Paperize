@@ -6,7 +6,7 @@ import com.anthonyla.paperize.core.ScalingType
 import com.anthonyla.paperize.core.constants.Constants
 
 data class ScheduleSettings(
-    val enableChanger: Boolean = false,
+    val enableChanger: Boolean = true,
     val separateSchedules: Boolean = false,
     val shuffleEnabled: Boolean = false,
     val homeEnabled: Boolean = false,
@@ -63,16 +63,24 @@ data class ScheduleSettings(
 
     fun hasSchedulingChanges(other: ScheduleSettings): Boolean {
         return enableChanger != other.enableChanger ||
-               homeAlbumId != other.homeAlbumId ||
-               lockAlbumId != other.lockAlbumId ||
-               liveAlbumId != other.liveAlbumId ||
-               homeEnabled != other.homeEnabled ||
-               lockEnabled != other.lockEnabled ||
-               homeIntervalMinutes != other.homeIntervalMinutes ||
-               lockIntervalMinutes != other.lockIntervalMinutes ||
-               separateSchedules != other.separateSchedules ||
-               liveIntervalMinutes != other.liveIntervalMinutes
+                homeAlbumId != other.homeAlbumId ||
+                lockAlbumId != other.lockAlbumId ||
+                liveAlbumId != other.liveAlbumId ||
+                homeEnabled != other.homeEnabled ||
+                lockEnabled != other.lockEnabled ||
+                homeIntervalMinutes != other.homeIntervalMinutes ||
+                lockIntervalMinutes != other.lockIntervalMinutes ||
+                separateSchedules != other.separateSchedules ||
+                liveIntervalMinutes != other.liveIntervalMinutes ||
+                homeEffects.enableChangeOnScreenOff != other.homeEffects.enableChangeOnScreenOff ||
+                lockEffects.enableChangeOnScreenOff != other.lockEffects.enableChangeOnScreenOff
     }
+
+    fun usesStaticScreenOff(mode: WallpaperMode): Boolean =
+        mode == WallpaperMode.STATIC && hasRequiredAlbums(mode) && (
+                (homeEnabled && homeAlbumId != null && homeEffects.enableChangeOnScreenOff) ||
+                        (lockEnabled && lockAlbumId != null && lockEffects.enableChangeOnScreenOff)
+                )
 
     /** Display changes reapply the current wallpaper without rescheduling periodic work. */
     fun hasDisplayChanges(other: ScheduleSettings): Boolean {
