@@ -21,6 +21,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import com.anthonyla.paperize.service.wallpaper.ScreenOffListenerService
 
 @Singleton
 class WallpaperScheduler @Inject constructor(
@@ -79,12 +80,14 @@ class WallpaperScheduler @Inject constructor(
                 workManager.cancelUniqueWork(workName(screen))
             }
         }
-        if (enabled) scheduleDailyAlbumRefresh(onlyIfNotScheduled) else workManager.cancelUniqueWork(Constants.WORK_NAME_REFRESH)
+        if (enabled) schedulePeriodicAlbumRefresh(onlyIfNotScheduled) else workManager.cancelUniqueWork(Constants.WORK_NAME_REFRESH)
+        ScreenOffListenerService.sync(context, settings.usesStaticScreenOff(mode))
     }
 
     fun cancelAllWallpaperChanges() {
         ScreenType.entries.forEach { workManager.cancelUniqueWork(workName(it)) }
         workManager.cancelUniqueWork(Constants.WORK_NAME_REFRESH)
+        ScreenOffListenerService.sync(context, false)
     }
 
     /** Rescan folders now; KEEP coalesces rapid foreground transitions into one scan. */
@@ -97,12 +100,9 @@ class WallpaperScheduler @Inject constructor(
     }
 
     /** Refresh daily, with the first run at the next 3 AM. */
-    private fun scheduleDailyAlbumRefresh(onlyIfNotScheduled: Boolean) {
-        val now = ZonedDateTime.now()
-        val today3am = now.toLocalDate().atTime(3, 0).atZone(now.zone)
-        val next3am = if (today3am.isAfter(now)) today3am else today3am.plusDays(1)
-        val workRequest = PeriodicWorkRequestBuilder<AlbumRefreshWorker>(1, TimeUnit.DAYS)
-            .setInitialDelay(Duration.between(now, next3am))
+    private fun schedulePeriodicAlbumRefresh(onlyIfNotScheduled: Boolean) {
+        val workRequest = PeriodicWorkRequestBuilder<AlbumRefreshWorker>(6, TimeUnit.HOURS)
+            .setInitialDelay(Duration.ofHours(6))
             .build()
         workManager.enqueueUniquePeriodicWork(Constants.WORK_NAME_REFRESH, policy(onlyIfNotScheduled), workRequest)
     }
