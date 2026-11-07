@@ -4,10 +4,11 @@ import android.app.WallpaperManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.util.Log
 import com.anthonyla.paperize.core.EmptyAlbumException
 import com.anthonyla.paperize.core.ScreenType
-import com.anthonyla.paperize.core.runCatchingCancellable
 import com.anthonyla.paperize.core.constants.Constants
+import com.anthonyla.paperize.core.runCatchingCancellable
 import com.anthonyla.paperize.core.util.setBitmapChecked
 import com.anthonyla.paperize.domain.model.PreparedWallpaper
 import com.anthonyla.paperize.domain.model.ScheduleSettings
@@ -15,15 +16,18 @@ import com.anthonyla.paperize.domain.repository.SettingsRepository
 import com.anthonyla.paperize.domain.usecase.ChangeWallpaperUseCase
 import com.anthonyla.paperize.domain.usecase.ReapplyEffectsUseCase
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.util.concurrent.ConcurrentHashMap
+import javax.inject.Inject
+import javax.inject.Singleton
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
-import javax.inject.Inject
 
 data class WallpaperChangeOutcome(val changed: Boolean = false, val emptyAlbum: Boolean = false)
 
 /** Call while holding WallpaperChangeLock so applying and resetting schedules stay ordered. */
+@Singleton
 class WallpaperController @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val wallpaperManager: WallpaperManager,
@@ -31,6 +35,65 @@ class WallpaperController @Inject constructor(
     private val render: ReapplyEffectsUseCase,
     private val settingsRepository: SettingsRepository
 ) {
+    private val preloadedWallpapers = ConcurrentHashMap<ScreenType, PreparedWallpaper>()
+
+    /** Pre-decodes and applies effects to the next wallpaper in the background for instant screen-off switching. */
+    suspend fun preloadNext(screen: ScreenType, settings: ScheduleSettings) {
+        if (screen == ScreenType.LIVE) return
+        when (screen) {
+            ScreenType.HOME -> settings.homeAlbumId?.let { preloadForScreen(it, ScreenType.HOME) }
+            ScreenType.LOCK -> settings.lockAlbumId?.let { preloadForScreen(it, ScreenType.LOCK) }
+            ScreenType.BOTH -> {
+                val home = settings.homeAlbumId
+                if (home != null && home == settings.lockAlbumId && !settings.separateSchedules) {
+                    // changeSynchronized() looks up ScreenType.BOTH!
+                    preloadForScreen(home, ScreenType.BOTH)
+                } else {
+                    // change() looks up ScreenType.HOME and ScreenType.LOCK separately!
+                    if (settings.homeEnabled && home != null) preloadForScreen(home, ScreenType.HOME)
+                    if (settings.lockEnabled && settings.lockAlbumId != null) preloadForScreen(settings.lockAlbumId, ScreenType.LOCK)
+                }
+            }
+            ScreenType.LIVE -> Unit
+        }
+    }
+
+    private suspend fun preloadForScreen(albumId: String, screen: ScreenType) {
+        val existing = preloadedWallpapers[screen]
+        if (existing != null && existing.albumId == albumId && !existing.bitmap.isRecycled) return
+        clearPreloaded(screen)
+        runCatchingCancellable {
+            val prepared = prepareOrDisable(albumId, screen)
+            if (prepared != null) {
+                preloadedWallpapers[screen] = prepared
+                Log.d("WallpaperController", "Preloaded next wallpaper for $screen")
+            }
+        }
+    }
+
+    suspend fun clearPreloaded(screen: ScreenType? = null) {
+        val keys = if (screen != null) listOf(screen) else preloadedWallpapers.keys.toList()
+        for (key in keys) {
+            preloadedWallpapers.remove(key)?.let { prepared ->
+                withContext(NonCancellable) { prepare.restore(prepared) }
+                if (!prepared.bitmap.isRecycled) prepared.bitmap.recycle()
+            }
+        }
+    }
+
+    private suspend fun takePreloadedOrPrepare(albumId: String, screen: ScreenType): PreparedWallpaper? {
+        val cached = preloadedWallpapers.remove(screen)
+        if (cached != null) {
+            if (cached.albumId == albumId && !cached.bitmap.isRecycled) {
+                return cached
+            } else {
+                withContext(NonCancellable) { prepare.restore(cached) }
+                if (!cached.bitmap.isRecycled) cached.bitmap.recycle()
+            }
+        }
+        return prepareOrDisable(albumId, screen)
+    }
+
     suspend fun change(screen: ScreenType, settings: ScheduleSettings): WallpaperChangeOutcome = when (screen) {
         ScreenType.LIVE -> {
             context.sendBroadcast(Intent(Constants.ACTION_RELOAD_WALLPAPER).setPackage(context.packageName))
@@ -50,13 +113,13 @@ class WallpaperController @Inject constructor(
 
     private suspend fun changeSelected(albumId: String?, screen: ScreenType): WallpaperChangeOutcome {
         if (albumId == null) return WallpaperChangeOutcome()
-        val prepared = prepareOrDisable(albumId, screen) ?: return WallpaperChangeOutcome(emptyAlbum = true)
+        val prepared = takePreloadedOrPrepare(albumId, screen) ?: return WallpaperChangeOutcome(emptyAlbum = true)
         applyPrepared(prepared, screen)
         return WallpaperChangeOutcome(changed = true)
     }
 
     private suspend fun changeSynchronized(albumId: String, settings: ScheduleSettings): WallpaperChangeOutcome {
-        val prepared = prepareOrDisable(albumId, ScreenType.BOTH) ?: return WallpaperChangeOutcome(emptyAlbum = true)
+        val prepared = takePreloadedOrPrepare(albumId, ScreenType.BOTH) ?: return WallpaperChangeOutcome(emptyAlbum = true)
         if (settings.sameStaticPresentation()) {
             applyPrepared(prepared, ScreenType.BOTH)
         } else {
@@ -82,7 +145,6 @@ class WallpaperController @Inject constructor(
             currentCoroutineContext().ensureActive()
             wallpaperManager.setBitmapChecked(prepared.bitmap, screen.flags())
             accepted = true
-            // Once Android accepts the bitmap, cancellation must not leave our current item stale.
             withContext(NonCancellable) {
                 screen.staticScreens().forEach { prepare.complete(prepared, it) }
             }
@@ -95,6 +157,7 @@ class WallpaperController @Inject constructor(
     }
 
     suspend fun applySpecific(albumId: String, wallpaperId: String, screen: ScreenType, settings: ScheduleSettings) {
+        clearPreloaded()
         val targets = if (screen == ScreenType.BOTH && !settings.sameStaticPresentation()) {
             listOf(ScreenType.HOME, ScreenType.LOCK)
         } else listOf(screen)
@@ -111,6 +174,7 @@ class WallpaperController @Inject constructor(
 
     suspend fun reapply(screen: ScreenType, settings: ScheduleSettings): WallpaperChangeOutcome {
         if (screen == ScreenType.LIVE) return WallpaperChangeOutcome()
+        clearPreloaded()
         var outcome = WallpaperChangeOutcome()
         for (target in screen.staticScreens()) {
             val albumId = if (target == ScreenType.HOME) settings.homeAlbumId else settings.lockAlbumId
