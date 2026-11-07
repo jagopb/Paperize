@@ -139,6 +139,34 @@ class AlbumRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun syncFolderWallpapers(
+        albumId: String,
+        folderId: String,
+        currentWallpapers: List<Wallpaper>
+    ): Int = database.withTransaction {
+        checkNotNull(albumDao.getAlbumById(albumId))
+        val currentUris = currentWallpapers.mapTo( hashSetOf() ) { it.uri }
+        val staleIds = mutableListOf<String>()
+        var afterId: String? = null
+        while (true) {
+            val page = wallpaperDao.getWallpapersByAlbumPage(albumId, WALLPAPER_BATCH_SIZE, afterId)
+            if (page.isEmpty()) break
+            page.filter { it.folderId == folderId && it.uri !in currentUris }
+                .mapTo(staleIds) { it.id }
+            afterId = page.last().id
+        }
+        if (staleIds.isNotEmpty()) {
+            staleIds.chunked(WALLPAPER_BATCH_SIZE).forEach { chunk ->
+                wallpaperDao.deleteAlbumWallpapers(albumId, chunk)
+            }
+            folderDao.updateFolderCover(folderId, wallpaperDao.getFolderCoverUri(folderId))
+            database.wallpaperQueueDao().clearAllQueues(albumId)
+            updateAlbumCoverIfNeeded(albumId)
+            albumDao.updateAlbumModifiedTime(albumId, System.currentTimeMillis())
+        }
+        insertNewWallpapers(albumId, currentWallpapers) { _, _ -> }
+    }
+
     override suspend fun removeWallpapersFromAlbum(
         albumId: String,
         wallpaperIds: List<String>
