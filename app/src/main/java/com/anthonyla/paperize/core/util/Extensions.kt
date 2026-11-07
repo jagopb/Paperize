@@ -16,6 +16,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resumeWithException
 
 fun Uri.isValid(contentResolver: ContentResolver): Boolean {
+    if (scheme == "https" || scheme == "http") return true
     if (scheme != "content") return false
     
     return try {
