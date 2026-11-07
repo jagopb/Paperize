@@ -163,6 +163,22 @@ fun WallpaperScreen(
                 onClick = { albumPickerScreen = ScreenType.LIVE }
             )
         }
+
+        val hasAlbumSelected = scheduleSettings.activeScreens(wallpaperMode).isNotEmpty()
+        val allRequiredAlbumsSelected = scheduleSettings.hasRequiredAlbums(wallpaperMode)
+
+        if (allRequiredAlbumsSelected) {
+            SettingSwitchItem(
+                title = "Use time interval",
+                description = stringResource(R.string.wallpaper_changer_description),
+                checked = scheduleSettings.enableChanger,
+                onCheckedChange = { enabled ->
+                    scheduleSettings = scheduleSettings.copy(enableChanger = enabled)
+                    onToggleChanger(enabled)
+                }
+            )
+        }
+
         if (wallpaperMode == WallpaperMode.STATIC && scheduleSettings.enableChanger && homeEnabled && lockEnabled) {
             SettingSwitchItem(
                 title = stringResource(R.string.individual_scheduling),
@@ -174,18 +190,7 @@ fun WallpaperScreen(
             )
         }
 
-        val hasAlbumSelected = scheduleSettings.activeScreens(wallpaperMode).isNotEmpty()
-        val allRequiredAlbumsSelected = scheduleSettings.hasRequiredAlbums(wallpaperMode)
-
-        if (allRequiredAlbumsSelected) {
-            SettingSwitchItem(
-                title = stringResource(R.string.wallpaper_changer),
-                description = stringResource(R.string.wallpaper_changer_description),
-                checked = scheduleSettings.enableChanger,
-                onCheckedChange = onToggleChanger
-            )
-        }
-        if (hasAlbumSelected) {
+        if (hasAlbumSelected && scheduleSettings.enableChanger) {
             if (wallpaperMode == WallpaperMode.STATIC) {
                 if (!scheduleSettings.separateSchedules || !homeEnabled || !lockEnabled) {
                     TimeIntervalPicker(
@@ -343,6 +348,7 @@ fun WallpaperScreen(
             }
         )
 
+        // 1. VISUAL EFFECTS CARD (Restored)
         Card(
             shape = MaterialTheme.shapes.medium,
             colors = CardDefaults.cardColors(
@@ -397,28 +403,29 @@ fun WallpaperScreen(
                 )
             }
         }
-        if (wallpaperMode == WallpaperMode.LIVE) {
-            Card(
-                shape = MaterialTheme.shapes.medium,
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(PaddingValues(horizontal = AppSpacing.small, vertical = AppSpacing.extraSmall))
+
+        Card(
+            shape = MaterialTheme.shapes.medium,
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(PaddingValues(horizontal = AppSpacing.small, vertical = AppSpacing.extraSmall))
+        ) {
+            Column(
+                modifier = Modifier.padding(AppSpacing.large),
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.small)
             ) {
-                Column(
-                    modifier = Modifier.padding(AppSpacing.large),
-                    verticalArrangement = Arrangement.spacedBy(AppSpacing.small)
-                ) {
-                    Text(
-                        text = stringResource(R.string.interactive_effects),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(bottom = AppSpacing.small),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                Text(
+                    text = stringResource(R.string.interactive_effects),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(bottom = AppSpacing.small),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (wallpaperMode == WallpaperMode.LIVE) {
                     SettingSwitchItem(
                         title = stringResource(R.string.double_tap_to_change),
                         description = if (scheduleSettings.liveEffects.enableDoubleTap) null else stringResource(R.string.double_tap_wallpaper_to_change_it),
@@ -431,18 +438,16 @@ fun WallpaperScreen(
                             )
                         }
                     )
-                    SettingSwitchItem(
-                        title = stringResource(R.string.change_on_screen_off),
-                        description = if (scheduleSettings.liveEffects.enableChangeOnScreenOff) null else stringResource(R.string.change_wallpaper_when_screen_turns_off),
-                        checked = scheduleSettings.liveEffects.enableChangeOnScreenOff,
-                        onCheckedChange = { enabled ->
-                            updateSettingsImmediate(
-                                scheduleSettings.copy(
-                                    liveEffects = scheduleSettings.liveEffects.copy(enableChangeOnScreenOff = enabled)
-                                )
-                            )
-                        }
-                    )
+                }
+                SettingSwitchItem(
+                    title = stringResource(R.string.change_on_screen_off),
+                    description = if (primaryEffects.enableChangeOnScreenOff) null else stringResource(R.string.change_wallpaper_when_screen_turns_off),
+                    checked = primaryEffects.enableChangeOnScreenOff,
+                    onCheckedChange = { enabled ->
+                        updateEffects({ it.copy(enableChangeOnScreenOff = enabled) })
+                    }
+                )
+                if (wallpaperMode == WallpaperMode.LIVE) {
                     SettingSwitchWithSlider(
                         title = R.string.parallax_effect,
                         description = R.string.wallpaper_moves_with_screen_scroll,
