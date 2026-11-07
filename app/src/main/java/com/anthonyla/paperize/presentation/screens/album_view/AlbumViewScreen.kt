@@ -46,6 +46,12 @@ import com.anthonyla.paperize.presentation.screens.album_view.components.ImportP
 import com.anthonyla.paperize.presentation.screens.album_view.components.SortBottomSheet
 import com.anthonyla.paperize.presentation.screens.album_view.components.SortOption
 import com.anthonyla.paperize.presentation.screens.album_view.components.WallpaperItem
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.ui.unit.dp
 
 @Composable
 fun AlbumViewScreen(
@@ -115,8 +121,13 @@ fun AlbumViewScreen(
             .aspectRatio(Constants.WALLPAPER_ASPECT_RATIO)
     }
 
+    var showAddFolderSourceDialog by rememberSaveable { mutableStateOf(false) }
+    var showGooglePhotosUrlDialog by rememberSaveable { mutableStateOf(false) }
+    var googlePhotosUrlInput by rememberSaveable { mutableStateOf("") }
+
+    // 1. Cloud Media Provider (Android Photo Picker)
     val imagePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenMultipleDocuments()
+        contract = ActivityResultContracts.PickMultipleVisualMedia()
     ) { uris: List<Uri> ->
         viewModel.addWallpapers(uris.map { it.toString() })
     }
@@ -125,6 +136,12 @@ fun AlbumViewScreen(
         contract = ActivityResultContracts.OpenDocumentTree()
     ) { uri: Uri? ->
         uri?.let { viewModel.addFolder(it.toString()) }
+    }
+
+    val launchCloudPhotoPicker = {
+        imagePickerLauncher.launch(
+            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+        )
     }
 
     Scaffold(
@@ -147,8 +164,8 @@ fun AlbumViewScreen(
             if (!isSelectionMode && totalItemsCount > 0) {
                 AddAlbumAnimatedFab(
                     isLoading = importProgress !is ImportProgress.Idle,
-                    onImageClick = { imagePickerLauncher.launch(arrayOf("image/*")) },
-                    onFolderClick = { folderPickerLauncher.launch(null) }
+                    onImageClick = launchCloudPhotoPicker,
+                    onFolderClick = { showAddFolderSourceDialog = true }
                 )
             }
         }
@@ -159,10 +176,10 @@ fun AlbumViewScreen(
                 hint = stringResource(R.string.album_empty_hint),
                 modifier = modifier.padding(paddingValues)
             ) {
-                FilledTonalButton(onClick = { imagePickerLauncher.launch(arrayOf("image/*")) }) {
+                FilledTonalButton(onClick = launchCloudPhotoPicker) {
                     Text(stringResource(R.string.add_wallpapers))
                 }
-                TextButton(onClick = { folderPickerLauncher.launch(null) }) {
+                TextButton(onClick = { showAddFolderSourceDialog = true }) {
                     Text(stringResource(R.string.add_folder))
                 }
             }
@@ -285,6 +302,79 @@ fun AlbumViewScreen(
             },
             dismissButton = {
                 TextButton(enabled = !isDeleting, onClick = { showDeleteAlbumDialog = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
+    }
+
+    if (showAddFolderSourceDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddFolderSourceDialog = false },
+            title = { Text(stringResource(R.string.add_folder)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilledTonalButton(
+                        onClick = {
+                            showAddFolderSourceDialog = false
+                            folderPickerLauncher.launch(null)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Device / Local Folder")
+                    }
+                    FilledTonalButton(
+                        onClick = {
+                            showAddFolderSourceDialog = false
+                            googlePhotosUrlInput = ""
+                            showGooglePhotosUrlDialog = true
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Google Photos Album URL")
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showAddFolderSourceDialog = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
+    }
+
+    if (showGooglePhotosUrlDialog) {
+        AlertDialog(
+            onDismissRequest = { showGooglePhotosUrlDialog = false },
+            title = { Text("Add Google Photos Album") },
+            text = {
+                Column {
+                    Text("Paste a shared Google Photos album link (photos.app.goo.gl). It will sync periodically.")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = googlePhotosUrlInput,
+                        onValueChange = { googlePhotosUrlInput = it },
+                        placeholder = { Text("https://photos.app.goo.gl/...") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = googlePhotosUrlInput.isNotBlank(),
+                    onClick = {
+                        val url = googlePhotosUrlInput.trim()
+                        showGooglePhotosUrlDialog = false
+                        viewModel.addFolder(url)
+                    }
+                ) {
+                    Text(stringResource(R.string.confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showGooglePhotosUrlDialog = false }) {
                     Text(stringResource(R.string.cancel))
                 }
             }
