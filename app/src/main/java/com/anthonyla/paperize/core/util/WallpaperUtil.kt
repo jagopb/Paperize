@@ -35,6 +35,9 @@ import androidx.compose.ui.util.fastRoundToInt
 import androidx.core.graphics.scale
 import androidx.exifinterface.media.ExifInterface
 import com.anthonyla.paperize.core.ScalingType
+import java.net.HttpURLConnection
+import java.net.URL
+import java.nio.ByteBuffer
 
 private const val TAG = "WallpaperUtil"
 private const val BUILT_IN_DISPLAY_CATEGORY =
@@ -175,6 +178,19 @@ internal fun usesLauncherManagedScrolling(
         screenType == com.anthonyla.paperize.core.ScreenType.BOTH) &&
         scaling == ScalingType.FILL
 
+internal fun fetchRemoteImageBytes(uri: Uri): ByteArray {
+    val connection = (URL(uri.toString()).openConnection() as HttpURLConnection).apply {
+        connectTimeout = 15_000
+        readTimeout = 20_000
+        instanceFollowRedirects = true
+    }
+    return try {
+        connection.inputStream.use { it.readBytes() }
+    } finally {
+        connection.disconnect()
+    }
+}
+
 fun retrieveBitmap(
     context: Context,
     wallpaperUri: Uri,
@@ -184,9 +200,18 @@ fun retrieveBitmap(
     preserveSourceOverflow: Boolean = false
 ): Bitmap? {
     // ImageDecoder reports dimensions after applying EXIF orientation.
+    val isRemote = wallpaperUri.scheme == "https" || wallpaperUri.scheme == "http"
+    val remoteBytes = if (isRemote) runCatching { fetchRemoteImageBytes(wallpaperUri) }.getOrNull() else null
+    if (isRemote && remoteBytes == null) return null
+
     var decodedWithImageDecoder = false
     val bitmap = try {
-        val source = ImageDecoder.createSource(context.contentResolver, wallpaperUri)
+        val source = if (remoteBytes != null) {
+            ImageDecoder.createSource(ByteBuffer.wrap(remoteBytes))
+        } else {
+            ImageDecoder.createSource(context.contentResolver, wallpaperUri)
+        }
+
         val result = ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
             val (targetW, targetH) = calculateDecodeSize(
                 info.size.width, info.size.height, width, height, scaling
