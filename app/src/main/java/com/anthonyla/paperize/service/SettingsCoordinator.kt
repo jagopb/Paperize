@@ -33,15 +33,21 @@ class SettingsCoordinator @Inject constructor(
     private val mutex = Mutex()
 
     suspend fun selectAlbum(screen: ScreenType, albumId: String?) = mutex.withLock {
+        val previouslyHadAlbums = settingsRepository.getScheduleSettings()
+            .hasRequiredAlbums(settingsRepository.getWallpaperMode())
         settingsRepository.updateAlbumId(screen, albumId)
         val mode = settingsRepository.getWallpaperMode()
         var settings = settingsRepository.getScheduleSettings()
         if (albumId == null && settings.activeScreens(mode).isEmpty()) {
             settingsRepository.updateEnableChanger(false)
             settings = settings.copy(enableChanger = false)
+        } else if (!previouslyHadAlbums && settings.hasRequiredAlbums(mode) && !settings.enableChanger) {
+            // Default "Use time interval" to true when required albums are newly configured
+            settingsRepository.updateEnableChanger(true)
+            settings = settings.copy(enableChanger = true)
         }
         scheduler.updateSchedules(settings, mode)
-        if (albumId != null && settings.enableChanger && settings.hasRequiredAlbums(mode) && mode == WallpaperMode.STATIC) {
+        if (albumId != null && settings. hasRequiredAlbums(mode) && mode == WallpaperMode.STATIC) {
             val active = settings.activeScreens(mode)
             WallpaperChangeService.changeWallpaper(context, if (ScreenType.BOTH in active) ScreenType.BOTH else screen)
         }
